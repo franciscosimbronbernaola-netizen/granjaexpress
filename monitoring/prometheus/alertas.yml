@@ -1,0 +1,70 @@
+# Alertas accionables: condición + duración + qué hacer
+groups:
+  - name: granja-express
+    rules:
+      - alert: ApiSinReplicas
+        expr: absent(up{job="api"} == 1)
+        for: 30s
+        labels: { severidad: critica }
+        annotations:
+          resumen: "No hay ninguna réplica de la API respondiendo"
+          accion: "kubectl -n granja get pods; revisar eventos y logs de la API"
+
+      - alert: ApiPocasReplicas
+        expr: count(up{job="api"} == 1) < 2
+        for: 1m
+        labels: { severidad: advertencia }
+        annotations:
+          resumen: "Menos de 2 réplicas de API activas: se perdió la redundancia"
+          accion: "Revisar HPA y por qué los pods no están Ready"
+
+      - alert: TasaErroresAlta
+        expr: |
+          sum(rate(http_requests_total{job="api",status=~"5.."}[1m]))
+            / sum(rate(http_requests_total{job="api"}[1m])) > 0.05
+        for: 30s
+        labels: { severidad: critica }
+        annotations:
+          resumen: "Más del 5% de las peticiones de la API fallan con 5xx"
+          accion: "Revisar logs de la API y el último despliegue (rollback si aplica)"
+
+      - alert: LatenciaP95Alta
+        expr: |
+          histogram_quantile(0.95,
+            sum by (le) (rate(http_request_duration_seconds_bucket{job="api",route=~"/api/.*"}[1m]))) > 1
+        for: 1m
+        labels: { severidad: advertencia }
+        annotations:
+          resumen: "El p95 de latencia de la API supera 1 segundo"
+          accion: "Ver saturación de CPU y si el HPA está escalando; revisar la BD"
+
+      - alert: CpuApiSaturada
+        expr: avg(rate(process_cpu_seconds_total{job="api"}[1m])) > 0.4
+        for: 2m
+        labels: { severidad: advertencia }
+        annotations:
+          resumen: "La API usa en promedio más de 0.4 núcleos por réplica"
+          accion: "Confirmar que el HPA alcanzó su máximo; evaluar subir maxReplicas"
+
+      - alert: RedisCircuitBreakerAbierto
+        expr: max(granja_redis_breaker_abierto) == 1
+        for: 15s
+        labels: { severidad: advertencia }
+        annotations:
+          resumen: "Redis no responde: la API opera sin caché (modo degradado)"
+          accion: "kubectl -n granja get pods -l app=redis; revisar logs de Redis"
+
+      - alert: ColaTicketsAcumulada
+        expr: max(granja_cola_tickets_largo{cola="tickets"}) > 50
+        for: 1m
+        labels: { severidad: advertencia }
+        annotations:
+          resumen: "Más de 50 tickets esperando en cola"
+          accion: "Escalar el worker o revisar el servicio de impresión"
+
+      - alert: MensajesEnDLQ
+        expr: sum(increase(granja_tickets_dlq_total[5m])) > 0
+        labels: { severidad: advertencia }
+        annotations:
+          resumen: "Hay tickets que fallaron todos sus reintentos (DLQ)"
+          accion: "Revisar outbox con estado DLQ y reprocesar"

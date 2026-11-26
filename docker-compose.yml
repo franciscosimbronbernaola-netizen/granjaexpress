@@ -1,0 +1,120 @@
+# =====================================================================
+# Granja Express Cloud - Entorno LOCAL de desarrollo (Docker Compose)
+# Levanta todo el sistema en una sola máquina, con PostgreSQL local.
+# En Kubernetes la base de datos es Supabase (servicio gestionado).
+#
+#   docker compose up -d --build
+#   App:        http://localhost:8080
+#   Grafana:    http://localhost:3000   (admin / admin)
+#   Prometheus: http://localhost:9090
+# =====================================================================
+name: granja-express
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: granja
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./db/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+      - ./db/seed.sql:/docker-entrypoint-initdb.d/02-seed.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d granja"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    networks: [datos]
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--maxmemory", "64mb", "--maxmemory-policy", "volatile-lru", "--appendonly", "no"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    networks: [datos]
+
+  api:
+    build: ./api
+    image: granja-api:1.0
+    environment:
+      DATABASE_URL: postgres://postgres:postgres@postgres:5432/granja
+      PGSSL: "false"
+      PG_POOL_MAX: "5"
+      REDIS_URL: redis://redis:6379
+      CACHE_TTL_SECONDS: "30"
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+    deploy:
+      replicas: 2                 # dos réplicas detrás del proxy de Nginx
+      resources:
+        limits: { cpus: "0.50", memory: 256M }
+    networks: [app, datos]
+
+  worker:
+    build: ./worker
+    image: granja-worker:1.0
+    environment:
+      DATABASE_URL: postgres://postgres:postgres@postgres:5432/granja
+      PGSSL: "false"
+      REDIS_URL: redis://redis:6379
+      PROB_FALLA_TICKET: "0.1"
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+    deploy:
+      resources:
+        limits: { cpus: "0.25", memory: 192M }
+    networks: [datos, app]
+
+  frontend:
+    build: ./frontend
+    image: granja-frontend:1.0
+    ports:
+      - "8080:8080"
+    depends_on: [api]
+    networks: [publica, app]
+
+  prometheus:
+    image: prom/prometheus:v3.1.0
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.retention.time=2d
+    volumes:
+      - ./monitoring/prometheus/prometheus-compose.yml:/etc/prometheus/prometheus.yml:ro
+      - ./monitoring/prometheus/alertas.yml:/etc/prometheus/alertas.yml:ro
+    ports:
+      - "9090:9090"
+    networks: [app]
+
+  grafana:
+    image: grafana/grafana:11.4.0
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /var/lib/grafana/dashboards/granja-express.json
+    volumes:
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    ports:
+      - "3000:3000"
+    depends_on: [prometheus]
+    networks: [app]
+
+# Tres redes = tres "subredes": pública (frontend), aplicación y datos.
+# La base de datos y Redis NO están en la red pública.
+networks:
+  publica:
+  app:
+  datos:
+    internal: true   # sin salida a Internet
+
+volumes:
+  pgdata:

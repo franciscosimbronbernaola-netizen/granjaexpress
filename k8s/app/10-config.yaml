@@ -1,0 +1,21 @@
+# Configuración NO sensible. Las credenciales van en el Secret "granja-secret"
+# (lo crea scripts/setup.sh a partir del archivo .env, que nunca se sube a GitHub).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: granja-config
+  namespace: granja
+data:
+  APP_VERSION: "1.0.0"
+  PGSSL: "true"                 # Supabase exige SSL
+  PG_POOL_MAX: "3"              # conexiones por réplica (el pooler de Supabase tiene límite)
+  REDIS_URL: "redis://redis:6379"
+  CACHE_TTL_SECONDS: "30"
+  COLA_TICKETS: "cola:tickets"
+  COLA_DLQ: "cola:tickets:dlq"
+  BREAKER_UMBRAL: "3"
+  BREAKER_ESPERA_MS: "10000"
+  MAX_INTENTOS: "3"
+  PROB_FALLA_TICKET: "0.05"     # 5% de fallos simulados del "servicio de impresión"
+  DEMORA_TICKET_MS: "200"
+  RELAY_CADA_MS: "5000"

@@ -1,0 +1,3 @@
+# Forzar saltos de linea LF (los scripts .sh fallan en Linux con CRLF de Windows)
+* text=auto eol=lf
+*.png binary

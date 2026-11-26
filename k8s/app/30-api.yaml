@@ -1,0 +1,131 @@
+# API REST: sin estado, escalable horizontalmente
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: api
+  namespace: granja
+  labels: { app: api, capa: aplicacion }
+spec:
+  replicas: 2
+  revisionHistoryLimit: 3
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0        # nunca bajar de la capacidad deseada al actualizar
+      maxSurge: 1
+  selector:
+    matchLabels: { app: api }
+  template:
+    metadata:
+      labels: { app: api, capa: aplicacion }
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "3000"
+        prometheus.io/path: "/metrics"
+    spec:
+      terminationGracePeriodSeconds: 20
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+      # Repartir réplicas entre nodos cuando haya más de uno
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels: { app: api }
+      containers:
+        - name: api
+          image: granja-api:1.0
+          imagePullPolicy: Never      # imagen construida dentro de Minikube
+          ports:
+            - containerPort: 3000
+              name: http
+          envFrom:
+            - configMapRef: { name: granja-config }
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef: { name: granja-secret, key: DATABASE_URL }
+            - name: POD_NAME
+              valueFrom:
+                fieldRef: { fieldPath: metadata.name }
+          resources:
+            requests: { cpu: 75m, memory: 96Mi }
+            limits:   { cpu: 400m, memory: 192Mi }
+          startupProbe:
+            httpGet: { path: /health, port: http }
+            periodSeconds: 2
+            failureThreshold: 30
+          readinessProbe:               # si la BD no responde, deja de recibir tráfico
+            httpGet: { path: /ready, port: http }
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 2
+          livenessProbe:                # si el proceso se cuelga, Kubernetes lo reinicia
+            httpGet: { path: /health, port: http }
+            periodSeconds: 10
+            timeoutSeconds: 2
+            failureThreshold: 3
+          lifecycle:
+            preStop:
+              exec: { command: ["sleep", "5"] }   # deja que el Service lo saque antes de cerrar
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: api
+  namespace: granja
+  labels: { app: api }
+spec:
+  type: ClusterIP
+  selector: { app: api }
+  ports:
+    - name: http
+      port: 3000
+      targetPort: http
+---
+# Escalado horizontal automático por CPU
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: api
+  namespace: granja
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: api
+  minReplicas: 2
+  maxReplicas: 6
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 60
+  behavior:
+    scaleUp:
+      stabilizationWindowSeconds: 0
+      policies:
+        - type: Pods
+          value: 2
+          periodSeconds: 15
+    scaleDown:
+      stabilizationWindowSeconds: 60     # en la demo baja en ~1 min (producción: 300 s)
+      policies:
+        - type: Pods
+          value: 1
+          periodSeconds: 30
+---
+# Durante mantenimientos voluntarios siempre queda al menos 1 réplica
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: api
+  namespace: granja
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels: { app: api }

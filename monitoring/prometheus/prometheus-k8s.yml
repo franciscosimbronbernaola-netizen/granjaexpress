@@ -1,0 +1,68 @@
+# Prometheus en Kubernetes: descubre los pods anotados con prometheus.io/scrape
+global:
+  scrape_interval: 5s
+  evaluation_interval: 5s
+  external_labels:
+    cluster: minikube-cloudshell
+
+rule_files:
+  - /etc/prometheus/alertas.yml
+
+scrape_configs:
+  # Pods de la aplicación (api, worker). El label "app" del pod pasa a ser el "job".
+  - job_name: granja-pods
+    kubernetes_sd_configs:
+      - role: pod
+        namespaces:
+          names: [granja]
+    relabel_configs:
+      - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_scrape]
+        action: keep
+        regex: "true"
+      - source_labels: [__meta_kubernetes_pod_phase]
+        action: keep
+        regex: Running
+      - source_labels: [__address__, __meta_kubernetes_pod_annotation_prometheus_io_port]
+        action: replace
+        regex: ([^:]+)(?::\d+)?;(\d+)
+        replacement: $1:$2
+        target_label: __address__
+      - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_path]
+        action: replace
+        regex: (.+)
+        target_label: __metrics_path__
+      - source_labels: [__meta_kubernetes_pod_label_app]
+        target_label: job
+      - source_labels: [__meta_kubernetes_pod_name]
+        target_label: kubernetes_pod
+      - source_labels: [__meta_kubernetes_pod_node_name]
+        target_label: node
+
+  # Uso real de CPU y memoria de cada contenedor (cAdvisor del kubelet, vía API server)
+  - job_name: cadvisor
+    scheme: https
+    tls_config:
+      ca_file: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+      insecure_skip_verify: true
+    authorization:
+      credentials_file: /var/run/secrets/kubernetes.io/serviceaccount/token
+    kubernetes_sd_configs:
+      - role: node
+    relabel_configs:
+      - target_label: __address__
+        replacement: kubernetes.default.svc:443
+      - source_labels: [__meta_kubernetes_node_name]
+        regex: (.+)
+        target_label: __metrics_path__
+        replacement: /api/v1/nodes/$1/proxy/metrics/cadvisor
+    metric_relabel_configs:
+      - source_labels: [namespace]
+        action: keep
+        regex: granja|monitoreo
+      - source_labels: [__name__]
+        action: keep
+        regex: container_cpu_usage_seconds_total|container_memory_working_set_bytes|container_network_(receive|transmit)_bytes_total|container_spec_cpu_quota|container_spec_memory_limit_bytes
+
+  - job_name: prometheus
+    static_configs:
+      - targets: ['localhost:9090']

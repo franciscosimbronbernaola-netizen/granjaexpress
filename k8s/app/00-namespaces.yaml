@@ -1,0 +1,16 @@
+# Namespaces = separación lógica (equivalente a VPCs/proyectos en la nube)
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: granja
+  labels:
+    proyecto: granja-express
+    capa: aplicacion
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: monitoreo
+  labels:
+    proyecto: granja-express
+    capa: observabilidad

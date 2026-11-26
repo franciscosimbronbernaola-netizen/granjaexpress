@@ -1,0 +1,123 @@
+# =====================================================================
+# Firewall interno (requiere CNI con soporte de NetworkPolicy: Calico)
+# Modelo de 3 capas, equivalente a subredes:
+#   pública  -> frontend      (solo el Ingress entra)
+#   app      -> api, worker   (solo el frontend entra a la API)
+#   datos    -> redis         (solo api y worker; sin salida a Internet)
+# =====================================================================
+
+# 1) Por defecto NADIE entra a ningún pod del namespace
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: denegar-todo-ingreso
+  namespace: granja
+spec:
+  podSelector: {}
+  policyTypes: [Ingress]
+---
+# 2) Frontend: solo desde el Ingress Controller y desde las pruebas de carga
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: permitir-frontend
+  namespace: granja
+spec:
+  podSelector:
+    matchLabels: { app: frontend }
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels: { kubernetes.io/metadata.name: ingress-nginx }
+        - podSelector:
+            matchLabels: { app: k6 }
+      ports:
+        - { protocol: TCP, port: 8080 }
+---
+# 3) API: solo desde el frontend, pruebas de carga y Prometheus
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: permitir-api
+  namespace: granja
+spec:
+  podSelector:
+    matchLabels: { app: api }
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels: { app: frontend }
+        - podSelector:
+            matchLabels: { app: k6 }
+        - namespaceSelector:
+            matchLabels: { kubernetes.io/metadata.name: monitoreo }
+          podSelector:
+            matchLabels: { app: prometheus }
+      ports:
+        - { protocol: TCP, port: 3000 }
+---
+# 4) Worker: solo Prometheus (para métricas)
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: permitir-worker-metricas
+  namespace: granja
+spec:
+  podSelector:
+    matchLabels: { app: worker }
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels: { kubernetes.io/metadata.name: monitoreo }
+          podSelector:
+            matchLabels: { app: prometheus }
+      ports:
+        - { protocol: TCP, port: 9100 }
+---
+# 5) Redis (capa de datos): solo api y worker pueden entrar...
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: permitir-redis
+  namespace: granja
+spec:
+  podSelector:
+    matchLabels: { app: redis }
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels: { app: api }
+        - podSelector:
+            matchLabels: { app: worker }
+      ports:
+        - { protocol: TCP, port: 6379 }
+  egress: []          # ...y Redis no puede salir a ningún lado (ni a Internet)
+---
+# 6) Frontend solo puede salir hacia la API y al DNS del clúster
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: salida-frontend
+  namespace: granja
+spec:
+  podSelector:
+    matchLabels: { app: frontend }
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - podSelector:
+            matchLabels: { app: api }
+      ports:
+        - { protocol: TCP, port: 3000 }
+    - to:
+        - namespaceSelector:
+            matchLabels: { kubernetes.io/metadata.name: kube-system }
+          podSelector:
+            matchLabels: { k8s-app: kube-dns }
+      ports:
+        - { protocol: UDP, port: 53 }
+        - { protocol: TCP, port: 53 }

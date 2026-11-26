@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Granja Express · Punto de venta</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="barra">
+    <div class="marca">
+      <span class="logo">GE</span>
+      <div>
+        <strong>Granja Express</strong>
+        <small>Punto de venta · Cloud</small>
+      </div>
+    </div>
+    <nav class="tabs" role="tablist">
+      <button class="tab activa" data-vista="vender">Vender</button>
+      <button class="tab" data-vista="ventas">Ventas</button>
+      <button class="tab" data-vista="caja">Caja</button>
+      <button class="tab" data-vista="sistema">Sistema</button>
+    </nav>
+    <div class="estado" id="estadoConexion" title="Estado de la API">
+      <span class="punto"></span><span id="textoEstado">Conectando…</span>
+    </div>
+  </header>
+
+  <main>
+    <!-- VENDER -->
+    <section class="vista activa" id="vista-vender">
+      <div class="pos">
+        <div class="catalogo">
+          <div class="filtros">
+            <input id="buscar" type="search" placeholder="Buscar producto…" autocomplete="off">
+            <div id="categorias" class="chips"></div>
+          </div>
+          <div id="productos" class="grilla"></div>
+          <p class="meta" id="metaCatalogo"></p>
+        </div>
+
+        <aside class="carrito">
+          <h2>Venta actual</h2>
+          <div id="itemsCarrito" class="items"><p class="vacio">Agrega productos del catálogo</p></div>
+          <div class="campo">
+            <label for="cliente">Cliente</label>
+            <input id="cliente" type="text" placeholder="Cliente varios" maxlength="120">
+          </div>
+          <div class="campo">
+            <label>Método de pago</label>
+            <div class="metodos" id="metodos">
+              <button class="metodo activo" data-metodo="EFECTIVO">Efectivo</button>
+              <button class="metodo" data-metodo="YAPE">Yape</button>
+              <button class="metodo" data-metodo="PLIN">Plin</button>
+              <button class="metodo" data-metodo="TARJETA">Tarjeta</button>
+            </div>
+          </div>
+          <div class="total"><span>Total</span><strong id="totalCarrito">S/ 0.00</strong></div>
+          <button id="btnCobrar" class="primario" disabled>Cobrar</button>
+          <button id="btnLimpiar" class="secundario">Limpiar</button>
+          <p class="meta" id="claveVenta"></p>
+        </aside>
+      </div>
+    </section>
+
+    <!-- VENTAS -->
+    <section class="vista" id="vista-ventas">
+      <div class="cabecera">
+        <h2>Últimas ventas</h2>
+        <button class="secundario" id="btnRecargarVentas">Actualizar</button>
+      </div>
+      <div class="tabla-envoltura">
+        <table>
+          <thead><tr><th>Nro</th><th>Fecha</th><th>Cliente</th><th>Pago</th><th class="num">Total</th><th>Pod</th><th>Ticket</th><th></th></tr></thead>
+          <tbody id="tablaVentas"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- CAJA -->
+    <section class="vista" id="vista-caja">
+      <div class="cabecera">
+        <h2>Caja del día</h2>
+        <button class="secundario" id="btnRecargarCaja">Actualizar</button>
+      </div>
+      <div class="kpis">
+        <div class="kpi"><span>Ventas</span><strong id="kpiVentas">0</strong></div>
+        <div class="kpi"><span>Total vendido</span><strong id="kpiTotal">S/ 0.00</strong></div>
+        <div class="kpi"><span>Ticket promedio</span><strong id="kpiPromedio">S/ 0.00</strong></div>
+      </div>
+      <div class="dos-columnas">
+        <div class="tarjeta"><h3>Por método de pago</h3><div id="porMetodo"></div></div>
+        <div class="tarjeta"><h3>Productos más vendidos</h3><div id="topProductos"></div></div>
+      </div>
+    </section>
+
+    <!-- SISTEMA -->
+    <section class="vista" id="vista-sistema">
+      <div class="cabecera">
+        <h2>Estado del sistema</h2>
+      </div>
+      <div class="dos-columnas">
+        <div class="tarjeta">
+          <h3>Balanceo entre réplicas</h3>
+          <p class="meta">Envía 30 peticiones y cuenta qué pod respondió cada una.</p>
+          <button class="primario angosto" id="btnBalanceo">Probar balanceo</button>
+          <div id="resultadoBalanceo"></div>
+        </div>
+        <div class="tarjeta">
+          <h3>API</h3>
+          <dl id="infoApi" class="info"></dl>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <div id="modal" class="modal" hidden>
+    <div class="modal-caja">
+      <button class="cerrar" id="cerrarModal" aria-label="Cerrar">×</button>
+      <h3 id="modalTitulo">Ticket</h3>
+      <pre id="modalContenido"></pre>
+    </div>
+  </div>
+
+  <div id="toast" class="toast" hidden></div>
+  <script src="app.js"></script>
+</body>
+</html>

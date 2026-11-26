@@ -1,0 +1,72 @@
+# =====================================================================
+# DRP: respaldo lógico de la base de datos (pg_dump) cada 6 horas.
+# Guarda los últimos 7 respaldos comprimidos en un volumen persistente.
+# En producción el destino sería un bucket de Cloud Storage en otra región.
+#   Ejecutar uno ya:  kubectl -n granja create job --from=cronjob/backup-bd backup-manual
+# =====================================================================
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: backups
+  namespace: granja
+spec:
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests:
+      storage: 1Gi
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: backup-bd
+  namespace: granja
+  labels: { app: backup }
+spec:
+  schedule: "0 */6 * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      ttlSecondsAfterFinished: 3600
+      template:
+        metadata:
+          labels: { app: backup }
+        spec:
+          restartPolicy: OnFailure
+          securityContext:
+            runAsUser: 70
+            runAsGroup: 70
+            fsGroup: 70
+          containers:
+            - name: pg-dump
+              image: postgres:17-alpine
+              env:
+                - name: DATABASE_URL
+                  valueFrom:
+                    secretKeyRef: { name: granja-secret, key: DATABASE_URL }
+                - name: BACKUP_DATABASE_URL
+                  valueFrom:
+                    secretKeyRef: { name: granja-secret, key: BACKUP_DATABASE_URL, optional: true }
+              command: ["/bin/sh", "-c"]
+              args:
+                - |
+                  set -eu
+                  URL="${BACKUP_DATABASE_URL:-$DATABASE_URL}"
+                  ARCHIVO="/backups/granja-$(date -u +%Y%m%d-%H%M%S).sql.gz"
+                  echo "Respaldando esquema public en $ARCHIVO"
+                  pg_dump "$URL" --schema=public --no-owner --no-privileges | gzip > "$ARCHIVO"
+                  echo "Tamaño: $(du -h "$ARCHIVO" | cut -f1)"
+                  ls -1t /backups/granja-*.sql.gz | tail -n +8 | xargs -r rm -f
+                  echo "Respaldos disponibles:"; ls -lh /backups
+              resources:
+                requests: { cpu: 20m, memory: 32Mi }
+                limits:   { cpu: 200m, memory: 128Mi }
+              volumeMounts:
+                - name: backups
+                  mountPath: /backups
+          volumes:
+            - name: backups
+              persistentVolumeClaim:
+                claimName: backups
